@@ -46,7 +46,14 @@ func initRedis() {
 	fmt.Println("redis connected!")
 }
 
+func enableCORS(w http.ResponseWriter) {
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+    w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
 func handleLogs(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
 	if r.Method != "GET" {
 		fmt.Fprintln(w, "method not allowed")
 		return
@@ -67,6 +74,7 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleExecute(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
 	if r.Method != "POST" {
 		fmt.Fprintln(w, "method not allowed")
 		return
@@ -83,6 +91,7 @@ func handleExecute(w http.ResponseWriter, r *http.Request) {
 
 
 func handleTasks(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
 	if r.Method == "GET" {
 		w.Header().Set("Content-Type", "application/json")
 		rows, err := db.Query("Select id, name, command, status FROM tasks")
@@ -131,6 +140,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 func main() {
     initDB()
 	initRedis()
+
 
 	http.HandleFunc("/", handleHome)
 	http.HandleFunc("/tasks", handleTasks)
