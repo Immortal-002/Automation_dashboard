@@ -8,6 +8,7 @@ import (
 	_ "github.com/lib/pq"
     "github.com/redis/go-redis/v9"
 	"context"
+        "github.com/robfig/cron/v3"
 )
 
 type Task struct {
@@ -137,6 +138,29 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "server is running! ")
 }
 
+func startScheduler() {
+    c := cron.New()
+    c.AddFunc("* * * * *", func() {
+        rows, err := db.Query("SELECT id FROM tasks WHERE schedule = '* * * * *'")
+        if err != nil {
+            fmt.Println("scheduler error:", err)
+            return
+        }
+        for rows.Next() {
+            var id int
+            rows.Scan(&id)
+            err := rdb.LPush(ctx, "job_queue", id).Err()
+            if err != nil {
+                fmt.Println("scheduler queue error:", err)
+            } else {
+                fmt.Println("scheduler queued task:", id)
+            }
+        }
+    })
+    c.Start()
+    fmt.Println("scheduler started!")
+}
+
 func main() {
     initDB()
 	initRedis()
@@ -147,6 +171,7 @@ func main() {
 	http.HandleFunc("/execute/", handleExecute)
 	http.HandleFunc("/logs/", handleLogs)
 	fmt.Println("server starting on port 9090 ..")
-	err := http.ListenAndServe(":9090",nil)
+        startScheduler()
+ 	err := http.ListenAndServe(":9090",nil)
 	fmt.Println("server error:", err)
 }
