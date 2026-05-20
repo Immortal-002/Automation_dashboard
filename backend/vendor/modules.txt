@@ -47,3 +47,6 @@ go.uber.org/atomic
 ## explicit; go 1.25.0
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blowfish
+# golang.org/x/time v0.15.0
+## explicit; go 1.25.0
+golang.org/x/time/rate

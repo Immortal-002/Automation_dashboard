@@ -8,7 +8,9 @@ import (
     "os/exec"
     "github.com/redis/go-redis/v9"
     _ "github.com/lib/pq"
+    "time"
 )
+
 
 var rdb *redis.Client
 var db *sql.DB
@@ -40,16 +42,31 @@ func processJob(taskID string) {
         return
     }
     fmt.Println("running command:", command)
-    out , err:= exec.Command("bash", "-c", command).Output()
-    if err != nil {
-        fmt.Println("exec error:", err)
-        return 
-    }
-    fmt.Println("output:", string(out))
-    id, _ := strconv.Atoi(taskID)
-    db.Exec("INSERT INTO job_logs ( task_id, output, status) VALUES ($1, $2, $3)", id, string(out), "success")
-}
+    var out []byte
+    var execErr error    
+    for i :=0; i<3; i++ {
+        out , execErr = exec.Command("bash", "-c", command).Output()
+        if execErr == nil {
+             break
+        }
+        fmt.Printf("attempt %d failed: %v\n", i+1, execErr)
+        time.Sleep(time.Duration(5*(i+1))*time.Second)
+    } 
 
+    id, _ := strconv.Atoi(taskID)
+    if execErr != nil {
+        fmt.Println("job failed after 3 attempts")
+        db.Exec("INSERT INTO job_logs (task_id, output, status) VALUES ($1, $2, $3)",
+            id, execErr.Error(), "failed")
+        return   
+
+
+    }
+        fmt.Println("output:", string(out))
+        db.Exec("INSERT INTO job_logs ( task_id, output, status) VALUES ($1, $2, $3)", id, string(out), "success")
+           
+
+}
 func main() {
     initDB()
     initRedis()

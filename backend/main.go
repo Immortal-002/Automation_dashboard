@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
     "golang.org/x/crypto/bcrypt"
     "time"
+    "golang.org/x/time/rate"
 )
 
 type User struct {
@@ -80,6 +81,17 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+var limiter = rate.NewLimiter(10,10)
+
+func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if !limiter.Allow() {
+            http.Error(w, "too many requests", http.StatusTooManyRequests)
+            return
+        }
+        next(w, r)
+    }
+}
 
 func handleRegister(w http.ResponseWriter, r *http.Request) {
         enableCORS(w)
@@ -253,9 +265,9 @@ func main() {
 
 
 	http.HandleFunc("/", handleHome)
-	http.HandleFunc("/tasks", authMiddleware(handleTasks))
-	http.HandleFunc("/execute/", authMiddleware(handleExecute))
-	http.HandleFunc("/logs/", authMiddleware(handleLogs))
+	http.HandleFunc("/tasks",rateLimitMiddleware(authMiddleware(handleTasks)))
+	http.HandleFunc("/execute/", rateLimitMiddleware(authMiddleware(handleExecute)))
+	http.HandleFunc("/logs/", rateLimitMiddleware(authMiddleware(handleLogs)))
 	http.HandleFunc("/register/", handleRegister)
 	http.HandleFunc("/login/", handleLogin)
 	fmt.Println("server starting on port 9090 ..")
