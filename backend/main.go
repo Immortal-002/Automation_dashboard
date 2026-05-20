@@ -8,8 +8,16 @@ import (
 	_ "github.com/lib/pq"
     "github.com/redis/go-redis/v9"
 	"context"
-        "github.com/robfig/cron/v3"
+    "github.com/robfig/cron/v3"
+	"github.com/golang-jwt/jwt/v5"
+    "golang.org/x/crypto/bcrypt"
+    "time"
 )
+
+type User struct {
+    Email string `json:"email"`
+    Password string `json:"password"`
+}
 
 type Task struct {
 	Name string `json:"name"`
@@ -52,6 +60,84 @@ func enableCORS(w http.ResponseWriter) {
     w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+        enableCORS(w)
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			fmt.Println(w, "no token provided")
+			return 
+		}
+		token , err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			return []byte("secret_key"), nil
+		})
+		if err != nil || !token.Valid {
+			fmt.Fprintln(w, "invalid token")
+			return
+		}
+		next(w,r)
+	}
+}
+
+
+func handleRegister(w http.ResponseWriter, r *http.Request) {
+        enableCORS(w)
+        if r.Method != "POST" {
+		    fmt.Fprintln(w, "method not allowed")
+	     	return
+     	}
+
+		var user User
+		json.NewDecoder(r.Body).Decode(&user)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), 14)
+        if err != nil {
+            fmt.Fprintln(w, "hash error:", err)
+            return
+        }
+	    _, error := db.Exec(
+			"INSERT INTO users (email, password) VALUES ($1, $2)",
+			user.Email, hashedPassword,
+		)
+		if error!= nil {
+			fmt.Fprintln(w, "db error:", err)
+			return
+		}
+		fmt.Fprintln(w,"user saved to d!", user.Email)
+		fmt.Fprintln(w, "created user:", user.Email, user.Password)
+}
+
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+    enableCORS(w)
+    if r.Method != "POST" {
+        fmt.Fprintln(w, "method not allowed")
+        return
+    }
+	 var user User
+    json.NewDecoder(r.Body).Decode(&user)
+
+    var storedPassword string
+    var userID int
+    err := db.QueryRow("SELECT id, password FROM users WHERE email = $1", 
+        user.Email).Scan(&userID, &storedPassword)
+    if err != nil {
+        fmt.Fprintln(w, "user not found")
+        return
+    }
+	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(user.Password))
+    if err != nil {
+        fmt.Fprintln(w, "wrong password")
+        return
+    }
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"exp": time.Now().Add(24*time.Hour).Unix(),
+	})
+	tokenString, _ := token.SignedString([]byte("secret_key"))
+	fmt.Fprintln(w, tokenString)
+}
+
 
 func handleLogs(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
@@ -167,9 +253,11 @@ func main() {
 
 
 	http.HandleFunc("/", handleHome)
-	http.HandleFunc("/tasks", handleTasks)
-	http.HandleFunc("/execute/", handleExecute)
-	http.HandleFunc("/logs/", handleLogs)
+	http.HandleFunc("/tasks", authMiddleware(handleTasks))
+	http.HandleFunc("/execute/", authMiddleware(handleExecute))
+	http.HandleFunc("/logs/", authMiddleware(handleLogs))
+	http.HandleFunc("/register/", handleRegister)
+	http.HandleFunc("/login/", handleLogin)
 	fmt.Println("server starting on port 9090 ..")
         startScheduler()
  	err := http.ListenAndServe(":9090",nil)
