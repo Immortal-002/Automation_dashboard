@@ -9,6 +9,8 @@ import (
     "github.com/redis/go-redis/v9"
     _ "github.com/lib/pq"
     "time"
+    "log/slog"
+    "os"
 )
 
 
@@ -23,14 +25,14 @@ func initDB() {
     if err!= nil {
         fmt.Println("db connection error:", err)
     }
-    fmt.Println("db connected!")
+    slog.Info("db connected!")
 }
 
 func initRedis() {
     rdb = redis.NewClient(&redis.Options{
         Addr: "localhost:6379",
     })
-    fmt.Println("redis connected!")
+    slog.Info("redis connected!")
 }
 
 
@@ -41,7 +43,7 @@ func processJob(taskID string) {
         fmt.Println("db error:", err)
         return
     }
-    fmt.Println("running command:", command)
+    slog.Info("running command:", command)
     var out []byte
     var execErr error    
     for i :=0; i<3; i++ {
@@ -55,7 +57,7 @@ func processJob(taskID string) {
 
     id, _ := strconv.Atoi(taskID)
     if execErr != nil {
-        fmt.Println("job failed after 3 attempts")
+        slog.Error("job failed after 3 attempts")
         db.Exec("INSERT INTO job_logs (task_id, output, status) VALUES ($1, $2, $3)",
             id, execErr.Error(), "failed")
         return   
@@ -68,16 +70,19 @@ func processJob(taskID string) {
 
 }
 func main() {
+    slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+    Level: slog.LevelInfo,
+})))
     initDB()
     initRedis()
 
 
-    fmt.Println("worker started, waiting for jobs...")
+    slog.Info("worker started, waiting for jobs...")
 
     for {
         result, err := rdb.BRPop(ctx, 0, "job_queue").Result()
         if err != nil {
-            fmt.Println("redis error:", err)
+            slog.Error("redis error:", err)
             continue
         }
         taskID := result[1]

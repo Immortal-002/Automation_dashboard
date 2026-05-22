@@ -13,6 +13,8 @@ import (
     "golang.org/x/crypto/bcrypt"
     "time"
     "golang.org/x/time/rate"
+    "log/slog"
+    "os"
 )
 
 type User struct {
@@ -46,14 +48,14 @@ func initDB() {
 	if err!= nil {
 		fmt.Println("db connection error:", err)
 	}
-	fmt.Println("db connected!")
+	slog.Info("db connected!")
 }
 
 func initRedis() {
 	rdb = redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-	fmt.Println("redis connected!")
+	slog.Info("redis connected!")
 }
 
 func enableCORS(w http.ResponseWriter) {
@@ -67,7 +69,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
         enableCORS(w)
 		tokenString := r.Header.Get("Authorization")
 		if tokenString == "" {
-			fmt.Println(w, "no token provided")
+			fmt.Fprintln(w, "no token provided")
 			return 
 		}
 		token , err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -241,7 +243,7 @@ func startScheduler() {
     c.AddFunc("* * * * *", func() {
         rows, err := db.Query("SELECT id FROM tasks WHERE schedule = '* * * * *'")
         if err != nil {
-            fmt.Println("scheduler error:", err)
+            slog.Error("scheduler error:", err)
             return
         }
         for rows.Next() {
@@ -256,10 +258,13 @@ func startScheduler() {
         }
     })
     c.Start()
-    fmt.Println("scheduler started!")
+    slog.Info("scheduler started!")
 }
 
 func main() {
+    slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+    Level: slog.LevelInfo,
+})))
     initDB()
 	initRedis()
 
@@ -270,7 +275,7 @@ func main() {
 	http.HandleFunc("/logs/", rateLimitMiddleware(authMiddleware(handleLogs)))
 	http.HandleFunc("/register/", handleRegister)
 	http.HandleFunc("/login/", handleLogin)
-	fmt.Println("server starting on port 9090 ..")
+	slog.Info("server starting on port 9090 ..")
         startScheduler()
  	err := http.ListenAndServe(":9090",nil)
 	fmt.Println("server error:", err)
