@@ -38,10 +38,19 @@ func initRedis() {
 
 func processJob(taskID string) {
     var command string
-	err := db.QueryRow("SELECT command FROM tasks WHERE id = $1", taskID).Scan(&command)
+	var dependsOn *int
+	err := db.QueryRow("SELECT command, depends_on FROM tasks WHERE id = $1", taskID).Scan(&command, &dependsOn)
     if err != nil {
         fmt.Println("db error:", err)
         return
+    }
+    if dependsOn != nil {
+        if !isDependencyComplete(*dependsOn) {
+            slog.Info("dependency not complete, requeueing", "task_id", taskID)
+            time.Sleep(5 * time.Second)
+            rdb.LPush(ctx, "job_queue", taskID)
+            return
+        }
     }
     slog.Info("running command:", command)
     var out []byte
@@ -69,6 +78,21 @@ func processJob(taskID string) {
            
 
 }
+
+func isDependencyComplete(dependsOn int) bool {
+    var status string
+    err := db.QueryRow(`
+        SELECT status FROM job_logs 
+        WHERE task_id = $1 
+        ORDER BY created_at DESC 
+        LIMIT 1
+    `, dependsOn).Scan(&status)
+    if err != nil {
+        return false
+    }
+    return status == "success"
+}
+
 func main() {
     slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
     Level: slog.LevelInfo,

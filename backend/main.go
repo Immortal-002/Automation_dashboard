@@ -32,6 +32,7 @@ type Task struct {
 	Command string `json:"command"`
 	ID      int    `json:"id"`
 	Status  string `json:"status"`
+	DependsOn *int `json:"depends_on"`
 }
 
 type Log struct {
@@ -213,7 +214,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method == "GET" {
 		w.Header().Set("Content-Type", "application/json")
-		rows, err := db.Query("SELECT id, name, command, status FROM tasks")
+		rows, err := db.Query("SELECT id, name, command, status, depends_on FROM tasks")
 		if err != nil {
 			fmt.Fprintln(w, "db error:", err)
 			return
@@ -221,7 +222,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		var allTasks []Task
 		for rows.Next() {
 			var t Task
-			rows.Scan(&t.ID, &t.Name, &t.Command, &t.Status)
+			rows.Scan(&t.ID, &t.Name, &t.Command, &t.Status, &t.DependsOn)
 			allTasks = append(allTasks, t)
 		}
 		json.NewEncoder(w).Encode(allTasks)
@@ -231,8 +232,8 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		var task Task
 		json.NewDecoder(r.Body).Decode(&task)
 		_, err := db.Exec(
-			"INSERT INTO tasks (name, command) VALUES ($1, $2)",
-			task.Name, task.Command,
+			"INSERT INTO tasks (name, command, depends_on) VALUES ($1, $2, $3)",
+			task.Name, task.Command, task.DependsOn,
 		)
 		if err != nil {
 			fmt.Fprintln(w, "db error:", err)
