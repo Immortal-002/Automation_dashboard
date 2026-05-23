@@ -12,7 +12,7 @@ function App() {
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
 
   const login = () => {
-    fetch('http://localhost:9090/login/', {
+    fetch('http://localhost:8080/login/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -27,7 +27,7 @@ function App() {
 
   const fetchTasks = () => {
     if (!token) return;
-    fetch('http://localhost:9090/tasks', {
+    fetch('http://localhost:8080/tasks', {
       headers: { 'Authorization': token }
     })
     .then(res => {
@@ -38,7 +38,7 @@ function App() {
   };
 
   const fetchLogs = (id: number) => {
-    fetch(`http://localhost:9090/logs/${id}`, {
+    fetch(`http://localhost:8080/logs/${id}`, {
       headers: { 'Authorization': token }
     })
     .then(res => {
@@ -53,7 +53,7 @@ function App() {
   }, [token]);
 
   const createTask = () => {
-    fetch('http://localhost:9090/tasks', {
+    fetch('http://localhost:8080/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': token },
       body: JSON.stringify({ name, command })
@@ -62,7 +62,7 @@ function App() {
 
   const runTask = (id: number) => {
     setSelectedTask(id);
-    fetch(`http://localhost:9090/execute/${id}`, {
+    fetch(`http://localhost:8080/execute/${id}`, {
       method: 'POST',
       headers: { 'Authorization': token }
     }).then(() => { setTimeout(() => fetchLogs(id), 2000); });

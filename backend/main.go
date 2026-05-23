@@ -265,8 +265,13 @@ func main() {
 	http.HandleFunc("/register/", handleRegister)
 	http.HandleFunc("/login/", handleLogin)
 
-	slog.Info("server starting", "port", 9090)
+	slog.Info("server starting", "first port", 9090)
 	startScheduler()
-	err := http.ListenAndServe(":9090", nil)
+	
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "9090"
+    }
+	err := http.ListenAndServe(":"+port, nil)
 	slog.Error("server error", "error", err)
 }
