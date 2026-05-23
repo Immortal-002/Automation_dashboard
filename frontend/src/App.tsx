@@ -18,14 +18,22 @@ function App() {
       body: JSON.stringify({ email, password })
     })
     .then(res => res.text())
-    .then(t => setToken(t.trim()));
+    .then(t => {
+      const cleanToken = t.trim();
+      setToken(cleanToken);
+      localStorage.setItem('token', cleanToken);
+    });
   };
 
   const fetchTasks = () => {
+    if (!token) return;
     fetch('http://localhost:9090/tasks', {
       headers: { 'Authorization': token }
     })
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) return [];
+      return res.json();
+    })
     .then(data => setTasks(data || []));
   };
 
@@ -33,7 +41,10 @@ function App() {
     fetch(`http://localhost:9090/logs/${id}`, {
       headers: { 'Authorization': token }
     })
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) return [];
+      return res.json();
+    })
     .then(data => setLogs(data || []));
   };
 
