@@ -17,6 +17,9 @@ import (
 	"github.com/robfig/cron/v3"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
+	
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type User struct {
@@ -41,6 +44,22 @@ type Log struct {
 var db *sql.DB
 var rdb *redis.Client
 var ctx = context.Background()
+var (
+	requestCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			  Help: "Total HTTP requests",
+        },
+        []string{"method", "path"},
+    )
+	requestDuration = prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name: "http_request_duration_seconds",
+            Help: "HTTP request duration",
+        },
+        []string{"path"},
+    )
+)
 
 func initDB() {
 	connStr := "user=postgres dbname=automation sslmode=disable"
@@ -251,19 +270,31 @@ func startScheduler() {
 	slog.Info("scheduler started")
 }
 
+func trackMetrics(path string, next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next(w, r)
+        requestCount.WithLabelValues(r.Method, path).Inc()
+        requestDuration.WithLabelValues(path).Observe(time.Since(start).Seconds())
+    }
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})))
+	prometheus.MustRegister(requestCount)
+    prometheus.MustRegister(requestDuration)
 	initDB()
 	initRedis()
 
 	http.HandleFunc("/", handleHome)
-	http.HandleFunc("/tasks", rateLimitMiddleware(authMiddleware(handleTasks)))
-	http.HandleFunc("/execute/", rateLimitMiddleware(authMiddleware(handleExecute)))
-	http.HandleFunc("/logs/", rateLimitMiddleware(authMiddleware(handleLogs)))
+	http.HandleFunc("/tasks", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleTasks))))
+	http.HandleFunc("/execute/", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleExecute))))
+	http.HandleFunc("/logs/", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleLogs))))
 	http.HandleFunc("/register/", handleRegister)
 	http.HandleFunc("/login/", handleLogin)
+	http.Handle("/metrics", promhttp.Handler())
 
 	slog.Info("server starting", "first port", 9090)
 	startScheduler()
