@@ -20,6 +20,8 @@ import (
 	
     "github.com/prometheus/client_golang/prometheus"
     "github.com/prometheus/client_golang/prometheus/promhttp"
+	"io"
+	"path/filepath"
 )
 
 type User struct {
@@ -244,6 +246,36 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleUpload(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method != "POST" {
+		fmt.Fprintln(w, "method not allowed")
+		return 
+	}
+
+	r.ParseMultipartForm(10<<20)
+	file, handler, err := r.FormFile("script")
+	if err != nil {
+		fmt.Fprintln(w, "error getting file:", err)
+        return
+    }
+    defer file.Close()
+	ext := filepath.Ext(handler.Filename)
+    if ext != ".py" && ext != ".sh" {
+        fmt.Fprintln(w, "only .py and .sh files allowed")
+        return
+    }
+	dst, err := os.Create("/home/rana/automation-dashboard/scripts/" + handler.Filename)
+    if err != nil {
+        fmt.Fprintln(w, "error saving file:", err)
+        return
+    }
+    defer dst.Close()
+    io.Copy(dst, file)
+
+    fmt.Fprintln(w, "script uploaded:", handler.Filename)
+}
+
 func handleHome(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "server is running!")
 }
@@ -280,6 +312,8 @@ func trackMetrics(path string, next http.HandlerFunc) http.HandlerFunc {
     }
 }
 
+
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -295,6 +329,7 @@ func main() {
 	http.HandleFunc("/logs/", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleLogs))))
 	http.HandleFunc("/register/", handleRegister)
 	http.HandleFunc("/login/", handleLogin)
+	http.HandleFunc("/upload", handleUpload)
 	http.Handle("/metrics", promhttp.Handler())
 
 	slog.Info("server starting", "first port", 9090)

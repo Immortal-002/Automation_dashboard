@@ -11,6 +11,7 @@ import (
     "time"
     "log/slog"
     "os"
+	"strings"
 )
 
 
@@ -54,7 +55,21 @@ func processJob(taskID string) {
     }
     slog.Info("running command:", command)
     var out []byte
-    var execErr error    
+    var execErr error  
+    
+	if strings.HasPrefix(command, "script:") {
+    scriptName := strings.TrimPrefix(command, "script:")
+    scriptPath := "/home/rana/automation-dashboard/scripts/" + scriptName
+    
+    // detect language
+    if strings.HasSuffix(scriptName, ".py") {
+        command = "python3 " + scriptPath
+    } else if strings.HasSuffix(scriptName, ".sh") {
+        command = "bash " + scriptPath
+    }
+}
+
+
     for i :=0; i<3; i++ {
         out , execErr = exec.Command("bash", "-c", command).Output()
         if execErr == nil {
