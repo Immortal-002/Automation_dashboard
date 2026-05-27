@@ -280,6 +280,70 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "server is running!")
 }
 
+
+
+func handleMe(w http.ResponseWriter, r *http.Request) {
+    enableCORS(w)
+    if r.Method != "GET" {
+        return
+    }
+
+    // Step 1: get user ID from token
+    tokenString := r.Header.Get("Authorization")
+    token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+        return []byte("secret_key"), nil
+    })
+    claims := token.Claims.(jwt.MapClaims)
+    userID := int(claims["user_id"].(float64))
+
+    // Step 2: query DB using that ID
+    var email, assistantName string
+    err := db.QueryRow(
+        "SELECT email, assistant_name FROM users WHERE id = $1",
+        userID,
+    ).Scan(&email, &assistantName)
+    if err != nil {
+        fmt.Fprintln(w, "user not found")
+        return
+    }
+
+    // Step 3: return JSON
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{
+        "email":          email,
+        "assistant_name": assistantName,
+    })
+}
+
+func handleMeAssistant(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method != "POST" {
+		return
+	}
+	tokenString := r.Header.Get("Authorization")
+	token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte("secret_key"), nil
+	})
+
+	claims := token.Claims.(jwt.MapClaims)
+	userID := int(claims["user_id"].(float64))
+
+	var body struct {
+		AssistantName string `json:"assistant_name"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+
+	_, err := db.Exec(
+		"UPDATE users SET assistant_name = $1 WHERE id = $2",
+		body.AssistantName, userID, )
+		if err!= nil {
+			fmt.Fprintln(w, "db error:", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status": "saved"}`)
+	}
+
 func startScheduler() {
 	c := cron.New()
 	c.AddFunc("* * * * *", func() {
@@ -331,6 +395,8 @@ func main() {
 	http.HandleFunc("/login/", handleLogin)
 	http.HandleFunc("/upload", handleUpload)
 	http.Handle("/metrics", promhttp.Handler())
+	http.HandleFunc("/me/",authMiddleware(handleMe))
+	http.HandleFunc("/me/assistant", authMiddleware(handleMeAssistant))
 
 	slog.Info("server starting", "first port", 9090)
 	startScheduler()

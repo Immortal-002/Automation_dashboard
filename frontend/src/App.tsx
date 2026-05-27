@@ -1,18 +1,28 @@
 
+
 import React, { useState, useEffect } from 'react';
+import './App.css';
+
+const API = 'http://localhost:9090';
 
 function App() {
   const [token, setToken] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [tasks, setTasks] = useState([]);
+  const [assistantName, setAssistantName] = useState('Orion');
+  const [username, setUsername] = useState('');
+  const [isFirstTime, setIsFirstTime] = useState(false);
+  const [newAssistantName, setNewAssistantName] = useState('');
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [selectedTask, setSelectedTask] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [command, setCommand] = useState('');
-  const [logs, setLogs] = useState([]);
-  const [selectedTask, setSelectedTask] = useState<number | null>(null);
+  const [greeting, setGreeting] = useState('');
+  const [showGreeting, setShowGreeting] = useState(false);
 
   const login = () => {
-    fetch('http://localhost:8080/login/', {
+    fetch(`${API}/login/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
@@ -20,40 +30,70 @@ function App() {
     .then(res => res.text())
     .then(t => {
       const cleanToken = t.trim();
-      setToken(cleanToken);
-      localStorage.setItem('token', cleanToken);
+      if (cleanToken.startsWith('eyJ')) {
+        setToken(cleanToken);
+        localStorage.setItem('token', cleanToken);
+        fetchUserInfo(cleanToken);
+      }
+    });
+  };
+
+  const fetchUserInfo = (tok: string) => {
+    fetch(`${API}/me`, {
+      headers: { 'Authorization': tok }
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.assistant_name) {
+        setAssistantName(data.assistant_name);
+        setUsername(data.email.split('@')[0]);
+        const msg = `${data.assistant_name} welcomes you back, ${data.email.split('@')[0]}`;
+        setGreeting(msg);
+        setShowGreeting(true);
+        setTimeout(() => setShowGreeting(false), 4000);
+      } else {
+        setIsFirstTime(true);
+      }
+    })
+    .catch(() => {
+      setGreeting(`Orion welcomes you back`);
+      setShowGreeting(true);
+      setTimeout(() => setShowGreeting(false), 4000);
+    });
+  };
+
+  const saveAssistantName = () => {
+    const name = newAssistantName.trim() || 'Orion';
+    fetch(`${API}/me/assistant`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': token },
+      body: JSON.stringify({ assistant_name: name })
+    }).then(() => {
+      setAssistantName(name);
+      setIsFirstTime(false);
+      setGreeting(`${name} is online. Welcome, ${username}`);
+      setShowGreeting(true);
+      setTimeout(() => setShowGreeting(false), 4000);
     });
   };
 
   const fetchTasks = () => {
     if (!token) return;
-    fetch('http://localhost:8080/tasks', {
-      headers: { 'Authorization': token }
-    })
-    .then(res => {
-      if (!res.ok) return [];
-      return res.json();
-    })
+    fetch(`${API}/tasks`, { headers: { 'Authorization': token } })
+    .then(res => { if (!res.ok) return []; return res.json(); })
     .then(data => setTasks(data || []));
   };
 
   const fetchLogs = (id: number) => {
-    fetch(`http://localhost:8080/logs/${id}`, {
-      headers: { 'Authorization': token }
-    })
-    .then(res => {
-      if (!res.ok) return [];
-      return res.json();
-    })
+    fetch(`${API}/logs/${id}`, { headers: { 'Authorization': token } })
+    .then(res => { if (!res.ok) return []; return res.json(); })
     .then(data => setLogs(data || []));
   };
 
-  useEffect(() => {
-    if (token) fetchTasks();
-  }, [token]);
+  useEffect(() => { if (token) fetchTasks(); }, [token]);
 
   const createTask = () => {
-    fetch('http://localhost:8080/tasks', {
+    fetch(`${API}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': token },
       body: JSON.stringify({ name, command })
@@ -62,41 +102,184 @@ function App() {
 
   const runTask = (id: number) => {
     setSelectedTask(id);
-    fetch(`http://localhost:8080/execute/${id}`, {
-      method: 'POST',
-      headers: { 'Authorization': token }
-    }).then(() => { setTimeout(() => fetchLogs(id), 2000); });
+    fetch(`${API}/execute/${id}`, { method: 'POST', headers: { 'Authorization': token } })
+    .then(() => { setTimeout(() => fetchLogs(id), 2000); });
   };
 
+  // LOGIN SCREEN
   if (!token) {
     return (
-      <div>
-        <h1>Login</h1>
-        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" />
-        <input value={password} onChange={e => setPassword(e.target.value)} placeholder="Password" type="password" />
-        <button onClick={login}>Login</button>
+      <div className="login-screen">
+        <div className="login-bg-grid" />
+        <div className="login-orb" />
+        
+        <div className="login-box">
+          <div className="login-logo">
+            <span className="login-logo__mark">⬡</span>
+            <span className="login-logo__name">ORION</span>
+          </div>
+          <p className="login-tagline">Your distributed command center</p>
+          
+          <div className="login-form">
+            <div className="input-group">
+              <label>EMAIL</label>
+              <input
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="operator@domain.com"
+                type="email"
+              />
+            </div>
+            <div className="input-group">
+              <label>PASSWORD</label>
+              <input
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                type="password"
+                onKeyDown={e => e.key === 'Enter' && login()}
+              />
+            </div>
+            <button className="btn-primary" onClick={login}>
+              INITIATE ACCESS
+            </button>
+          </div>
+        </div>
+
+        <div className="login-footer">AUTOMATION DASHBOARD v1.1</div>
       </div>
     );
   }
 
-  return (
-    <div>
-      <h1>Automation Dashboard</h1>
-      <h2>Create Task</h2>
-      <input value={name} onChange={e => setName(e.target.value)} placeholder="Task name" />
-      <input value={command} onChange={e => setCommand(e.target.value)} placeholder="Command" />
-      <button onClick={createTask}>Create</button>
-      <h2>Tasks</h2>
-      {tasks.map((task: any) => (
-        <div key={task.id}>
-          <p>{task.name} — {task.command} — {task.status}</p>
-          <button onClick={() => runTask(task.id)}>Run</button>
+  // FIRST TIME — NAME YOUR ASSISTANT
+  if (isFirstTime) {
+    return (
+      <div className="login-screen">
+        <div className="login-bg-grid" />
+        <div className="login-box">
+          <div className="login-logo">
+            <span className="login-logo__mark">⬡</span>
+            <span className="login-logo__name">WELCOME</span>
+          </div>
+          <p className="login-tagline">Name your assistant. It will serve you from here on.</p>
+          <div className="input-group">
+            <label>ASSISTANT NAME</label>
+            <input
+              value={newAssistantName}
+              onChange={e => setNewAssistantName(e.target.value)}
+              placeholder="e.g. Orion, Atlas, Nova..."
+              onKeyDown={e => e.key === 'Enter' && saveAssistantName()}
+            />
+          </div>
+          <button className="btn-primary" onClick={saveAssistantName}>
+            ACTIVATE ASSISTANT
+          </button>
         </div>
-      ))}
-      <h2>Logs {selectedTask ? `- Task #${selectedTask}` : ''}</h2>
-      {logs.map((log: any) => (
-        <p key={log.id}>{log.output} — {log.status}</p>
-      ))}
+      </div>
+    );
+  }
+
+  // MAIN DASHBOARD
+  return (
+    <div className="dashboard">
+      {/* GREETING OVERLAY */}
+      {showGreeting && (
+        <div className="greeting-overlay">
+          <span className="greeting-text">{greeting}</span>
+        </div>
+      )}
+
+      {/* SIDEBAR */}
+      <aside className="sidebar">
+        <div className="sidebar-logo">
+          <span className="sidebar-logo__mark">⬡</span>
+          <span className="sidebar-logo__text">ORION</span>
+        </div>
+        <nav className="sidebar-nav">
+          <a className="sidebar-nav__item active" href="#">Tasks</a>
+          <a className="sidebar-nav__item" href="#">Logs</a>
+          <a className="sidebar-nav__item" href="#">Metrics</a>
+          <a className="sidebar-nav__item" href="#">Scripts</a>
+        </nav>
+        <div className="sidebar-status">
+          <span className="status-dot status-dot--online" />
+          <span>System Online</span>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT */}
+      <main className="main">
+        {/* HEADER */}
+        <header className="topbar">
+          <div className="topbar-title">TASK CONTROL</div>
+          <div className="topbar-right">
+            <span className="topbar-user">{username}</span>
+          </div>
+        </header>
+
+        {/* CREATE TASK */}
+        <section className="panel">
+          <h2 className="panel-title">NEW TASK</h2>
+          <div className="create-form">
+            <input
+              className="field"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Task name"
+            />
+            <input
+              className="field"
+              value={command}
+              onChange={e => setCommand(e.target.value)}
+              placeholder="Command (e.g. echo hello)"
+            />
+            <button className="btn-primary" onClick={createTask}>DEPLOY</button>
+          </div>
+        </section>
+
+        {/* TASK LIST */}
+        <section className="panel">
+          <h2 className="panel-title">ACTIVE TASKS <span className="panel-count">{tasks.length}</span></h2>
+          <div className="task-list">
+            {tasks.map((task: any) => (
+              <div key={task.id} className="task-card">
+                <div className="task-card__info">
+                  <span className="task-card__id">#{task.id}</span>
+                  <span className="task-card__name">{task.name}</span>
+                  <code className="task-card__cmd">{task.command}</code>
+                </div>
+                <div className="task-card__right">
+                  <span className={`badge badge--${task.status}`}>{task.status}</span>
+                  <button className="btn-run" onClick={() => runTask(task.id)}>RUN ▶</button>
+                </div>
+              </div>
+            ))}
+            {tasks.length === 0 && <p className="empty-state">No tasks deployed yet.</p>}
+          </div>
+        </section>
+
+        {/* LOGS */}
+        {selectedTask && (
+          <section className="panel">
+            <h2 className="panel-title">EXECUTION LOGS — TASK #{selectedTask}</h2>
+            <div className="log-viewer">
+              {logs.map((log: any) => (
+                <div key={log.id} className={`log-line log-line--${log.status}`}>
+                  <span className="log-line__status">[{log.status.toUpperCase()}]</span>
+                  <span className="log-line__output">{log.output}</span>
+                </div>
+              ))}
+              {logs.length === 0 && <p className="log-empty">Awaiting execution output...</p>}
+            </div>
+          </section>
+        )}
+      </main>
+
+      {/* ASSISTANT WIDGET */}
+      <div className="assistant-widget">
+        <div className="assistant-bubble">{assistantName} online</div>
+        <div className="assistant-avatar">⬡</div>
+      </div>
     </div>
   );
 }
