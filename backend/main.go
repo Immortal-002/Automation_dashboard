@@ -121,6 +121,29 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+
+func handleCheckEmail(w http.ResponseWriter, r *http.Request) {
+    enableCORS(w)
+    if r.Method != "POST" {
+        return
+    }
+    var body struct {
+        Email string `json:"email"`
+    }
+    json.NewDecoder(r.Body).Decode(&body)
+
+    var count int
+    db.QueryRow("SELECT COUNT(*) FROM users WHERE email = $1", 
+        body.Email).Scan(&count)
+
+    w.Header().Set("Content-Type", "application/json")
+    if count > 0 {
+        fmt.Fprint(w, `{"exists": true}`)
+    } else {
+        fmt.Fprint(w, `{"exists": false}`)
+    }
+}
+
 func handleRegister(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method != "POST" {
@@ -169,7 +192,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"user_id": userID,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"exp":     time.Now().Add(48 * time.Hour).Unix(),
 	})
 	tokenString, _ := token.SignedString([]byte("secret_key"))
 	fmt.Fprint(w, tokenString)
@@ -214,9 +237,20 @@ func handleExecute(w http.ResponseWriter, r *http.Request) {
 
 func handleTasks(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
+
+// extract userID once — available to both GET and POST
+    tokenString := r.Header.Get("Authorization")
+    token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+        return []byte("secret_key"), nil
+    })
+    claims := token.Claims.(jwt.MapClaims)
+    userID := int(claims["user_id"].(float64))
+
 	if r.Method == "GET" {
 		w.Header().Set("Content-Type", "application/json")
-		rows, err := db.Query("SELECT id, name, command, status, depends_on FROM tasks")
+
+// then filter by user
+        rows, err := db.Query("SELECT id, name, command, status, depends_on FROM tasks WHERE user_id = $1", userID)
 		if err != nil {
 			fmt.Fprintln(w, "db error:", err)
 			return
@@ -234,8 +268,8 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 		var task Task
 		json.NewDecoder(r.Body).Decode(&task)
 		_, err := db.Exec(
-			"INSERT INTO tasks (name, command, depends_on) VALUES ($1, $2, $3)",
-			task.Name, task.Command, task.DependsOn,
+			"INSERT INTO tasks (name, command, depends_on, user_id) VALUES ($1, $2, $3, $4)",
+			task.Name, task.Command, task.DependsOn, userID,
 		)
 		if err != nil {
 			fmt.Fprintln(w, "db error:", err)
@@ -395,8 +429,9 @@ func main() {
 	http.HandleFunc("/login/", handleLogin)
 	http.HandleFunc("/upload", handleUpload)
 	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/me/",authMiddleware(handleMe))
+	http.HandleFunc("/me",authMiddleware(handleMe))
 	http.HandleFunc("/me/assistant", authMiddleware(handleMeAssistant))
+    http.HandleFunc("/check-email", handleCheckEmail)
 
 	slog.Info("server starting", "first port", 9090)
 	startScheduler()
