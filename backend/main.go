@@ -64,6 +64,14 @@ var (
     )
 )
 
+var jwtSecret = func() string {
+    s := os.Getenv("JWT_SECRET")
+    if s == "" {
+        slog.Warn("JWT_SECRET not set, using default — DO NOT use in production")
+        return "secret_key"
+    }
+    return s
+}()
 func initDB() {
 	connStr := "user=postgres dbname=automation sslmode=disable"
 	var err error
@@ -95,13 +103,15 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		tokenString := r.Header.Get("Authorization")
 		if tokenString == "" {
+            w.WriteHeader(http.StatusUnauthorized)
 			fmt.Fprintln(w, "no token provided")
 			return
 		}
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			return []byte("secret_key"), nil
+			return []byte(jwtSecret), nil
 		})
 		if err != nil || !token.Valid {
+            w.WriteHeader(http.StatusUnauthorized)
 			fmt.Fprintln(w, "invalid token")
 			return
 		}
@@ -194,7 +204,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		"user_id": userID,
 		"exp":     time.Now().Add(48 * time.Hour).Unix(),
 	})
-	tokenString, _ := token.SignedString([]byte("secret_key"))
+	tokenString, _ := token.SignedString([]byte(jwtSecret))
 	fmt.Fprint(w, tokenString)
 }
 
@@ -241,7 +251,7 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 // extract userID once — available to both GET and POST
     tokenString := r.Header.Get("Authorization")
     token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-        return []byte("secret_key"), nil
+        return []byte(jwtSecret), nil
     })
     claims := token.Claims.(jwt.MapClaims)
     userID := int(claims["user_id"].(float64))
@@ -267,6 +277,12 @@ func handleTasks(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		var task Task
 		json.NewDecoder(r.Body).Decode(&task)
+        if task.Name == "" || task.Command == "" {
+            w.Header().Set("Content-Type", "application/json")
+            w.WriteHeader(http.StatusBadRequest) // sends 400
+            fmt.Fprint(w, `{"error": "name and command are required"}`)
+            return
+        }
 		_, err := db.Exec(
 			"INSERT INTO tasks (name, command, depends_on, user_id) VALUES ($1, $2, $3, $4)",
 			task.Name, task.Command, task.DependsOn, userID,
@@ -325,7 +341,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
     // Step 1: get user ID from token
     tokenString := r.Header.Get("Authorization")
     token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-        return []byte("secret_key"), nil
+        return []byte(jwtSecret), nil
     })
     claims := token.Claims.(jwt.MapClaims)
     userID := int(claims["user_id"].(float64))
@@ -356,7 +372,7 @@ func handleMeAssistant(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenString := r.Header.Get("Authorization")
 	token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return []byte("secret_key"), nil
+		return []byte(jwtSecret), nil
 	})
 
 	claims := token.Claims.(jwt.MapClaims)

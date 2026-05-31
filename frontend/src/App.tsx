@@ -42,6 +42,11 @@ const checkEmail = () => {
 };
 
 
+const runTask = (id: number) => {
+    setSelectedTask(id);
+    fetch(`${API}/execute/${id}`, { method: 'POST', headers: { 'Authorization': token } })
+    .then(() => { setTimeout(() => fetchLogs(id), 2000); });
+};
 const logout = () => {
     setToken('');
     localStorage.removeItem('token');
@@ -153,20 +158,26 @@ const fetchTasks = (tok?: string) => {
 
 useEffect(() => { if (token) fetchTasks(token); }, [token]);
 
-  const createTask = () => {
+
+const createTask = () => {
+    if (!name.trim() || !command.trim()) {
+        alert('Task name and command are required');
+        return;
+    }
     fetch(`${API}/tasks`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': token },
-      body: JSON.stringify({ name, command })
-    }).then(() => { setName(''); setCommand(''); fetchTasks(); });
-  };
-
-  const runTask = (id: number) => {
-    setSelectedTask(id);
-    fetch(`${API}/execute/${id}`, { method: 'POST', headers: { 'Authorization': token } })
-    .then(() => { setTimeout(() => fetchLogs(id), 2000); });
-  };
-
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': token },
+        body: JSON.stringify({ name, command })
+    }).then(res => {
+        if (!res.ok) {
+            alert('Failed to create task');
+            return;
+        }
+        setName('');
+        setCommand('');
+        fetchTasks(token);
+    });
+};
   // LOGIN SCREEN
 if (!token) {
   return (
