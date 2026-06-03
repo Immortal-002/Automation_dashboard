@@ -131,6 +131,37 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func handleDelete(w http.ResponseWriter, r *http.Request) {
+    enableCORS(w)
+    if r.Method != "POST" { return }
+    
+    id := r.URL.Path[len("/delete/"):]
+    
+    // delete logs first (foreign key constraint)
+    db.Exec("DELETE FROM job_logs WHERE task_id = $1", id)
+    
+    // then delete task
+    _, err := db.Exec("DELETE FROM tasks WHERE id = $1", id)
+    if err != nil {
+        fmt.Fprintln(w, "db error:", err)
+        return
+    }
+    fmt.Fprint(w, `{"status": "deleted"}`)
+}
+
+
+func handleCancel(w http.ResponseWriter, r *http.Request) {
+    enableCORS(w)
+    if r.Method != "POST" { return }
+    
+    id := r.URL.Path[len("/cancel/"):]
+    _, err := db.Exec("UPDATE tasks SET cancelled = true WHERE id = $1", id)
+    if err != nil {
+        fmt.Fprintln(w, "db error:", err)
+        return
+    }
+    fmt.Fprint(w, `{"status": "cancelled"}`)
+}
 
 func handleCheckEmail(w http.ResponseWriter, r *http.Request) {
     enableCORS(w)
@@ -448,7 +479,9 @@ func main() {
 	http.HandleFunc("/me",authMiddleware(handleMe))
 	http.HandleFunc("/me/assistant", authMiddleware(handleMeAssistant))
     http.HandleFunc("/check-email", handleCheckEmail)
+    http.HandleFunc("/cancel/", authMiddleware(handleCancel))
 
+    http.HandleFunc("/delete/", authMiddleware(handleDelete))
 	slog.Info("server starting", "first port", 9090)
 	startScheduler()
 	

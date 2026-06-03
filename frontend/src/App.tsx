@@ -28,6 +28,12 @@ const [userExists, setUserExists] = useState(false);
 const [error, setError] = useState('');
 
   
+const deleteTask = (id: number) => {
+    fetch(`${API}/delete/${id}`, { 
+        method: 'POST', 
+        headers: { 'Authorization': token } 
+    }).then(() => fetchTasks(token));
+};
 const checkEmail = () => {
   fetch(`${API}/check-email`, {
     method: 'POST',
@@ -358,6 +364,7 @@ if (!token) {
                 <div className="task-card__right">
                   <span className={`badge badge--${task.status}`}>{task.status}</span>
                   <button className="btn-run" onClick={() => runTask(task.id)}>RUN ▶</button>
+                  <button className="btn-delete" onClick={() => deleteTask(task.id)}>✕</button>
                 </div>
               </div>
             ))}

@@ -12,6 +12,7 @@ import (
     "log/slog"
     "os"
 	"strings"
+	
 )
 
 
@@ -45,6 +46,12 @@ func processJob(taskID string) {
         fmt.Println("db error:", err)
         return
     }
+var cancelled bool
+db.QueryRow("SELECT cancelled FROM tasks WHERE id = $1", taskID).Scan(&cancelled)
+if cancelled {
+    slog.Info("task cancelled, skipping", "task_id", taskID)
+    return
+}
     if dependsOn != nil {
         if !isDependencyComplete(*dependsOn) {
             slog.Info("dependency not complete, requeueing", "task_id", taskID)
@@ -56,22 +63,48 @@ func processJob(taskID string) {
     slog.Info("running command:", command)
     var out []byte
     var execErr error  
+   
     
-	if strings.HasPrefix(command, "script:") {
+if strings.HasPrefix(command, "script:") {
     scriptName := strings.TrimPrefix(command, "script:")
     scriptPath := "/home/rana/automation-dashboard/scripts/" + scriptName
     
-    // detect language
+    var dockerCmd string
     if strings.HasSuffix(scriptName, ".py") {
-        command = "python3 " + scriptPath
+        dockerCmd = fmt.Sprintf(
+            "docker run --rm --network none --memory 128m --cpus 0.5 -v %s:/script.py:ro python:3.11-alpine python /script.py",
+            scriptPath,
+        )
     } else if strings.HasSuffix(scriptName, ".sh") {
-        command = "bash " + scriptPath
+        dockerCmd = fmt.Sprintf(
+            "docker run --rm --network none --memory 128m --cpus 0.5 -v %s:/script.sh:ro alpine sh /script.sh",
+            scriptPath,
+        )
     }
+    command = dockerCmd
 }
 
 
+
+//	if strings.HasPrefix(command, "script:") {
+  //  scriptName := strings.TrimPrefix(command, "script:")
+ //   scriptPath := "/home/rana/automation-dashboard/scripts/" + scriptName
+    
+    // detect language
+  //  if strings.HasSuffix(scriptName, ".py") {
+      //  command = "python3 " + scriptPath
+    //} else if strings.HasSuffix(scriptName, ".sh") {
+  //      command = "bash " + scriptPath
+   // }
+//}
+
+        
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+
     for i :=0; i<3; i++ {
-        out , execErr = exec.Command("bash", "-c", command).Output()
+        out , execErr = exec.CommandContext(ctx, "bash", "-c", command).Output()
         if execErr == nil {
              break
         }
