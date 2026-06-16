@@ -72,21 +72,30 @@ var jwtSecret = func() string {
     }
     return s
 }()
-func initDB() {
+func initDB() error{
 	connStr := "user=postgres dbname=automation sslmode=disable"
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
-		slog.Error("db connection error", "error", err)
+		return fmt.Errorf("open db: %w", err)
 	}
-	slog.Info("db connected")
+	
+    if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("ping db: %w", err)
+	}
+	return nil
 }
 
 func initRedis() {
 	rdb = redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-	slog.Info("redis connected")
+
+    if err := rdb.Ping(ctx).Err(); err != nil 
+	{
+		return fmt.Errorf("ping db: %w", err)
+    }
+
 }
 
 func enableCORS(w http.ResponseWriter) {
@@ -465,8 +474,19 @@ func main() {
 	})))
 	prometheus.MustRegister(requestCount)
     prometheus.MustRegister(requestDuration)
-	initDB()
-	initRedis()
+	
+
+    if err := initDB(); err != nil {
+	    slog.Error("db init failed", "error", err)
+	    return
+    }
+    slog.Info("db connected")
+
+    if err := initRedis(); err != nil {
+	    slog.Error("redis init failed", "error", err)
+	    return
+    }
+	slog.Info("redis connected")
 
 	http.HandleFunc("/", handleHome)
 	http.HandleFunc("/tasks", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleTasks))))
