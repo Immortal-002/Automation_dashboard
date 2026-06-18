@@ -9,6 +9,8 @@ services:
       POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
 
   redis:
     image: redis:7
@@ -19,12 +21,21 @@ services:
     build: ./backend
     ports:
       - "9090:9090"
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
     depends_on:
       - postgres
       - redis
 
   worker:
     build: ./worker
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
     depends_on:
       - postgres
       - redis
+
+volumes:
+  pgdata:

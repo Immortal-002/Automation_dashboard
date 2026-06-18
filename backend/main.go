@@ -46,7 +46,10 @@ type Log struct {
 
 var db *sql.DB
 var rdb *redis.Client
-var ctx = context.Background()
+
+var dbPool *sql.DB  
+type ctxKey string
+const userIDKey ctxKey = "userID"
 var (
 	requestCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -73,30 +76,55 @@ var jwtSecret = func() string {
     return s
 }()
 func initDB() error{
-	connStr := "user=postgres dbname=automation sslmode=disable"
+	host := os.Getenv("DB_HOST")
+    if host == "" {
+        host = "localhost"
+    }
+	connStr := fmt.Sprintf("host=%s user=postgres password=postgres dbname=automation sslmode=disable", host)
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
-	
-    if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping db: %w", err)
-	}
-	return nil
-}
-
-func initRedis() {
-	rdb = redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
-
-    if err := rdb.Ping(ctx).Err(); err != nil 
-	{
-		return fmt.Errorf("ping db: %w", err)
+    // retry up to 10 times, waiting 2 seconds between attempts
+    for i := 0; i < 10; i++ {
+        ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+        err = db.PingContext(ctx)
+        cancel()
+        if err == nil {
+            return nil
+        }
+        slog.Info("waiting for postgres...", "attempt", i+1)
+        time.Sleep(2 * time.Second)
     }
+    return fmt.Errorf("ping db after retries: %w", err)
+}
+
+func initRedis() error{
+	host := os.Getenv("REDIS_HOST")
+    if host == "" {
+        host = "localhost"
+    }
+	rdb = redis.NewClient(&redis.Options{
+		Addr: host + ":6379",
+	})
+	// retry up to 10 times, waiting 2 seconds between attempts
+	var err error
+    for i := 0; i < 10; i++ {
+        ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := rdb.Ping(ctx).Err()
+        cancel()
+        if err == nil {
+            return nil
+		}
+        slog.Info("waiting for redis...", "attempt", i+1)
+        time.Sleep(2 * time.Second)
+    }
+    return fmt.Errorf("ping rdb after retries: %w", err)
+    
 
 }
+
 
 func enableCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -117,6 +145,9 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
 			return []byte(jwtSecret), nil
 		})
 		if err != nil || !token.Valid {
@@ -124,7 +155,16 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			fmt.Fprintln(w, "invalid token")
 			return
 		}
-		next(w, r)
+		claims, ok := token.Claims.(jwt.MapClaims)
+        userIDFloat, ok2 := claims["user_id"].(float64)
+        if !ok || !ok2 {
+            w.WriteHeader(http.StatusUnauthorized)
+            fmt.Fprintln(w, "invalid token claims")
+            return
+        }
+        ctx := context.WithValue(r.Context(), userIDKey, int(userIDFloat))
+        next(w, r.WithContext(ctx))
+		//next(w, r)
 	}
 }
 
@@ -254,12 +294,24 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "method not allowed")
 		return
 	}
+	userID, ok := getUserIDFromContext(r)
+    if !ok {
+        http.Error(w, "unauthorized", http.StatusUnauthorized)
+        return
+    }
 	id := r.URL.Path[len("/logs/"):]
+	 if id == "" {
+        http.Error(w, "task_id required", http.StatusBadRequest)
+        return
+    }
 	rows, err := db.Query("SELECT id, task_id, output, status FROM job_logs WHERE task_id = $1", id)
 	if err != nil {
-		fmt.Fprintln(w, "db error:", err)
+		// CORRECT — returns 500 with generic message, logs details server-side
+        slog.Error("db operation failed", "error", err,"task_id", id, "user_id", userID, "endpoint", "logs")
+        http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	defer rows.Close()
 	var allLogs []Log
 	for rows.Next() {
 		var l Log
@@ -273,29 +325,68 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 func handleExecute(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method != "POST" {
-		fmt.Fprintln(w, "method not allowed")
+		 http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	userID, ok := getUserIDFromContext(r)
+    if !ok {
+        http.Error(w, "unauthorized", http.StatusUnauthorized)
+        return
+    }
 	id := r.URL.Path[len("/execute/"):]
-	err := rdb.LPush(ctx, "job_queue", id).Err()
+	if id == "" {
+        http.Error(w, "task id required", http.StatusBadRequest)
+        return
+	}
+    var ownerID int
+    err := dbPool.QueryRow("SELECT user_id FROM tasks WHERE id = $1", id).Scan(&ownerID)
+	 if err == sql.ErrNoRows {
+        http.Error(w, "task not found", http.StatusNotFound)
+        return
+    }
 	if err != nil {
-		fmt.Fprintln(w, "redis error:", err)
+        slog.Error("db query failed", "error", err)
+        http.Error(w, "internal server error", http.StatusInternalServerError)
+        return
+    }
+    if ownerID != userID {
+        http.Error(w, "forbidden", http.StatusForbidden)
+        return
+    }
+
+	ctx := r.Context()
+	err = rdb.LPush(ctx, "job_queue", id).Err()
+	if err != nil {
+		// CORRECT — returns 500 with generic message, logs details server-side
+        slog.Error("redis operation failed", "error", err, "endpoint", "execute")
+        http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusAccepted)
 	fmt.Fprintln(w, "job queued! task id:", id)
 }
 
+// getUserIDFromContext extracts the user ID from request context safely
+func getUserIDFromContext(r *http.Request) (int, bool) {
+	userID, ok := r.Context().Value(userIDKey).(int)
+	return userID, ok
+}
 func handleTasks(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 
 // extract userID once — available to both GET and POST
-    tokenString := r.Header.Get("Authorization")
-    token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-        return []byte(jwtSecret), nil
-    })
-    claims := token.Claims.(jwt.MapClaims)
-    userID := int(claims["user_id"].(float64))
-
+//    tokenString := r.Header.Get("Authorization")
+//    token, _ := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+//        return []byte(jwtSecret), nil
+//    })
+//    claims := token.Claims.(jwt.MapClaims)
+//    userID := int(claims["user_id"].(float64))
+    userID, ok := getUserIDFromContext(r)  
+	if !ok {  
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintln(w, "unauthorized: user context missing")  
+		return  
+	}  
 	if r.Method == "GET" {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -445,6 +536,7 @@ func startScheduler() {
 		for rows.Next() {
 			var id int
 			rows.Scan(&id)
+			ctx := context.Background()
 			err := rdb.LPush(ctx, "job_queue", id).Err()
 			if err != nil {
 				slog.Error("scheduler queue error", "error", err)
@@ -490,8 +582,8 @@ func main() {
 
 	http.HandleFunc("/", handleHome)
 	http.HandleFunc("/tasks", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleTasks))))
-	http.HandleFunc("/execute/", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleExecute))))
-	http.HandleFunc("/logs/", trackMetrics("/tasks", rateLimitMiddleware(authMiddleware(handleLogs))))
+	http.HandleFunc("/execute/", trackMetrics("/execute", rateLimitMiddleware(authMiddleware(handleExecute))))
+	http.HandleFunc("/logs/", trackMetrics("/logs", rateLimitMiddleware(authMiddleware(handleLogs))))
 	http.HandleFunc("/register/", handleRegister)
 	http.HandleFunc("/login/", handleLogin)
 	http.HandleFunc("/upload", handleUpload)

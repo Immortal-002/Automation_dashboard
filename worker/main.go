@@ -20,21 +20,54 @@ var rdb *redis.Client
 var db *sql.DB
 var ctx = context.Background()
 
-func initDB() {
-    connStr := "user=postgres dbname=automation sslmode=disable"
-    var err error
-    db,err = sql.Open("postgres", connStr)
-    if err!= nil {
-        fmt.Println("db connection error:", err)
+func initDB() error{
+	host := os.Getenv("DB_HOST")
+    if host == "" {
+        host = "localhost"
     }
-    slog.Info("db connected!")
+	connStr := fmt.Sprintf("host=%s user=postgres password=postgres dbname=automation sslmode=disable", host)
+	var err error
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+    // retry up to 10 times, waiting 2 seconds between attempts
+    for i := 0; i < 10; i++ {
+        ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+        err = db.PingContext(ctx)
+        cancel()
+        if err == nil {
+            return nil
+        }
+        slog.Info("waiting for postgres...", "attempt", i+1)
+        time.Sleep(2 * time.Second)
+    }
+    return fmt.Errorf("ping db after retries: %w", err)
 }
 
-func initRedis() {
-    rdb = redis.NewClient(&redis.Options{
-        Addr: "localhost:6379",
-    })
-    slog.Info("redis connected!")
+func initRedis() error{
+	host := os.Getenv("REDIS_HOST")
+    if host == "" {
+        host = "localhost"
+    }
+	rdb = redis.NewClient(&redis.Options{
+		Addr: host + ":6379",
+	})
+	// retry up to 10 times, waiting 2 seconds between attempts
+	var err error
+    for i := 0; i < 10; i++ {
+        ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := rdb.Ping(ctx).Err()
+        cancel()
+        if err == nil {
+            return nil
+		}
+        slog.Info("waiting for redis...", "attempt", i+1)
+        time.Sleep(2 * time.Second)
+    }
+    return fmt.Errorf("ping rdb after retries: %w", err)
+    
+
 }
 
 
@@ -145,8 +178,18 @@ func main() {
     slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
     Level: slog.LevelInfo,
 })))
-    initDB()
-    initRedis()
+     if err := initDB(); err != nil {
+	    slog.Error("db init failed", "error", err)
+	    return
+    }
+    slog.Info("db connected")
+
+    if err := initRedis(); err != nil {
+	    slog.Error("redis init failed", "error", err)
+	    return
+    }
+	slog.Info("redis connected")
+
 
 
     slog.Info("worker started, waiting for jobs...")
