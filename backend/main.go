@@ -46,8 +46,7 @@ type Log struct {
 
 var db *sql.DB
 var rdb *redis.Client
-
-var dbPool *sql.DB  
+ 
 type ctxKey string
 const userIDKey ctxKey = "userID"
 var (
@@ -339,7 +338,7 @@ func handleExecute(w http.ResponseWriter, r *http.Request) {
         return
 	}
     var ownerID int
-    err := dbPool.QueryRow("SELECT user_id FROM tasks WHERE id = $1", id).Scan(&ownerID)
+    err := db.QueryRow("SELECT user_id FROM tasks WHERE id = $1", id).Scan(&ownerID)
 	 if err == sql.ErrNoRows {
         http.Error(w, "task not found", http.StatusNotFound)
         return
