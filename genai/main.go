@@ -9,6 +9,7 @@ import (
 	"strings"
 	"bufio"
 //	"io"
+    "context"
 )
 
 type ChatRequest struct {
@@ -126,13 +127,6 @@ conversationHistory = append(conversationHistory, GroqMessage{
 
 
 func main() {
-    emb, err := getEmbedding("table")
-    if err != nil {
-        fmt.Println("error:", err)
-    } else {
-        fmt.Printf("dimensions: %d\n", len(emb))
-        fmt.Printf("first 3 values: %.4f, %.4f, %.4f\n", emb[0], emb[1], emb[2])
-    }
     http.HandleFunc("/chat", handleChat)
     fmt.Println("server running on :8080")
     http.ListenAndServe(":8080", nil)

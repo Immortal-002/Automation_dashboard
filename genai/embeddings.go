@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"math"
 )
 type EmbeddingRequest struct {
 	Model  string `json:"model"`
@@ -35,4 +36,13 @@ func getEmbedding(text string) ([]float64, error) {
 	json.NewDecoder(resp.Body).Decode(&embResp)
 
 	return embResp.Embedding, nil
+}
+func cosineSimilarity(a, b []float64) float64 {
+	var dot, normA, normB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
