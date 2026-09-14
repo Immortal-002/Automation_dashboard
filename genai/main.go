@@ -9,7 +9,7 @@ import (
 	"strings"
 	"bufio"
 //	"io"
-    "context"
+ "context"
 )
 
 type ChatRequest struct {
@@ -68,6 +68,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "groq call failed", http.StatusInternalServerError)
 		return
 	}
+fmt.Println("groq status:", resp.StatusCode)
 	defer resp.Body.Close()
 
 
@@ -127,7 +128,11 @@ conversationHistory = append(conversationHistory, GroqMessage{
 
 
 func main() {
+	conn, _ := connectDB()
+    ingestSampleData(conn)
+    conn.Close(context.Background())
     http.HandleFunc("/chat", handleChat)
+	http.HandleFunc("/rag", handleRAG)
     fmt.Println("server running on :8080")
     http.ListenAndServe(":8080", nil)
 }
