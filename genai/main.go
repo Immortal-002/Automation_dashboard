@@ -73,6 +73,7 @@ fmt.Println("groq status:", resp.StatusCode)
 
 
 	scanner := bufio.NewScanner(resp.Body)
+scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 var fullResponse string
 
 for scanner.Scan() {

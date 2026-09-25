@@ -125,7 +125,10 @@ fmt.Println("api key set:", os.Getenv("GROQ_API_KEY") != "")
 	}
 	defer resp.Body.Close()
 
-	scanner := bufio.NewScanner(resp.Body)
+fmt.Println("groq status:", resp.StatusCode)
+scanner := bufio.NewScanner(resp.Body)
+scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" || !strings.HasPrefix(line, "data: ") {
