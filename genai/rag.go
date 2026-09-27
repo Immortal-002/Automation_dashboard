@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"bytes"
 	"github.com/jackc/pgx/v5"
+	"io"
 )
 
 func ingestSampleData(conn *pgx.Conn) {
@@ -55,7 +56,7 @@ Question: %s`, context, question)
 }
 
 func handleRAG(w http.ResponseWriter, r *http.Request) {
-    fmt.Println("RAG handler called") 
+     
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -71,7 +72,7 @@ func handleRAG(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
- fmt.Println("decoded request:", req.Message)
+
 
 
 	// step 1: embed the question
@@ -80,7 +81,7 @@ func handleRAG(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "embedding failed", http.StatusInternalServerError)
 		return
 	}
- fmt.Println("embedding done, dims:", len(queryEmb))
+ 
 
 
 	// step 2: retrieve relevant chunks
@@ -89,7 +90,7 @@ func handleRAG(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "db connection failed", http.StatusInternalServerError)
 		return
 	}
- fmt.Println("db connected")
+ 
 	defer conn.Close(context.Background())
 
 	chunks, err := searchDocuments(conn, queryEmb, 3)
@@ -97,20 +98,19 @@ func handleRAG(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "search failed", http.StatusInternalServerError)
 		return
 	}
- fmt.Println("chunks retrieved:", len(chunks))
+ 
 
 	// step 3: build the prompt
 	prompt := buildRAGPrompt(chunks, req.Message)
 
 	// step 4: send to Groq and stream back
 	groqReq := GroqRequest{
-		Model: "llama-3.3-70b-versatile",
+		Model: "openai/gpt-oss-20b",
 		Messages: []GroqMessage{
 			{Role: "user", Content: prompt},
 		},
 		Stream: true,
 	}
-fmt.Println("api key set:", os.Getenv("GROQ_API_KEY") != "")
 
 	body, _ := json.Marshal(groqReq)
 	httpReq, _ := http.NewRequest("POST", "https://api.groq.com/openai/v1/chat/completions", bytes.NewBuffer(body))
@@ -125,7 +125,13 @@ fmt.Println("api key set:", os.Getenv("GROQ_API_KEY") != "")
 	}
 	defer resp.Body.Close()
 
-fmt.Println("groq status:", resp.StatusCode)
+
+if resp.StatusCode != 200 {
+    body, _ := io.ReadAll(resp.Body)
+    fmt.Println("groq error:", string(body))
+    http.Error(w, "groq call failed", http.StatusInternalServerError)
+    return
+}
 scanner := bufio.NewScanner(resp.Body)
 scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 

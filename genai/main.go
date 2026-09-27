@@ -25,6 +25,7 @@ type GroqMessage struct {
 	Content string `json:"content"`
 }
 
+const groqModel = "openai/gpt-oss-20b"
 
 var conversationHistory = []GroqMessage{
 	{Role: "system", Content: "You are a concise technical assistant."},
@@ -52,7 +53,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
     })
 
 	groqReq := GroqRequest{
-		Model: "llama-3.3-70b-versatile",
+		Model: "openai/gpt-oss-20b",
 		Messages: conversationHistory,
 		Stream: true,
 	}
@@ -68,7 +69,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "groq call failed", http.StatusInternalServerError)
 		return
 	}
-fmt.Println("groq status:", resp.StatusCode)
+
 	defer resp.Body.Close()
 
 
